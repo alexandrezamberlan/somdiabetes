@@ -176,11 +176,20 @@ class MinhaRefeicaoListView(LoginRequiredMixin, ListView):
             
         return qs
 
+
+
 class MinhaRefeicaoCreateView(LoginRequiredMixin, CreateView):
     model = RegistroRefeicao
-    fields = ['registro_alimentacao', 'glicemia_vigente']    
+    fields = ['registro_alimentacao', 'glicemia_vigente']
     template_name = 'appcliente/registrorefeicao_form.html'
     success_url = 'appcliente_registrorefeicao_list'
+
+    def form_valid(self, form):
+        formulario = form.save(commit=False)
+        dado_clinico = DadoClinico.objects.filter(cliente=self.request.user).first()
+        formulario.cliente = dado_clinico
+        formulario.save()
+        return super().form_valid(form)
 
     def get_success_url(self):
         messages.success(self.request, 'Registro de refeição cadastrado com sucesso na plataforma!')

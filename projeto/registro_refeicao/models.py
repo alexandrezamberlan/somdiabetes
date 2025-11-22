@@ -4,6 +4,7 @@ from django.db import models
 from django.urls import reverse
 from .conecta_llm import Conecta
 from utils.gerador_hash import gerar_hash
+import json
 
 class RegistroRefeicao(models.Model):
     cliente = models.ForeignKey('dado_clinico.DadoClinico', verbose_name='Cliente ou paciente *', on_delete=models.PROTECT, help_text="* indica campo obrigatório.")
@@ -33,26 +34,49 @@ class RegistroRefeicao(models.Model):
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = gerar_hash()
-            
-        medicamentos = [med.nome_comercial for med in self.cliente.medicamentos.all()] if self.cliente.medicamentos.exists() else []
+
+        medicamentos = [med.nome_comercial for med in
+                        self.cliente.medicamentos.all()] if self.cliente.medicamentos.exists() else []
         tipo_diabetes = self.cliente.tipo_diabetes or "SEM DIABETES"
-        bolus_alimentar = self.cliente.bolus_alimentar or 1 #1 unidade de insulina para cada 10g de carboidrato
-        bolus_correcao = self.cliente.bolus_correcao or 1 #1 unidade de insulina para cada 10mg/dL acima da meta
+        bolus_alimentar = self.cliente.bolus_alimentar or 1
+        bolus_correcao = self.cliente.bolus_correcao or 1
         glicemia_meta = self.cliente.glicemia_meta or 100
         glicemia_atual = self.glicemia_vigente
         descricao_alimentacao = self.registro_alimentacao
-        
-        contexto_json = Conecta.montar_json(medicamentos, tipo_diabetes, bolus_alimentar, bolus_correcao, glicemia_meta, glicemia_atual, descricao_alimentacao)
+
+        contexto_json = Conecta.montar_json(medicamentos, tipo_diabetes, bolus_alimentar, bolus_correcao, glicemia_meta,
+                                            glicemia_atual, descricao_alimentacao)
         total_tokens = 0
         resposta_json, total_tokens = Conecta.gerar_recomendacoes(contexto_json)
-        
-        lista_alimentos = []
-        lista_alimentos, carboidratos, calorias, qtd_insulina, nome_insulina = Conecta.desmontar_json(resposta_json)
-        self.total_carboidratos = int(carboidratos)
-        self.total_calorias = int(calorias)
-        self.quantidade_insulina_recomendada = int(qtd_insulina)
-        self.nome_insulina = nome_insulina
-        
+
+        print("RESPOSTA DA IA:")
+        print(f"Tipo: {type(resposta_json)}")
+        print(f"Conteúdo: {resposta_json}")
+        print(f"Tamanho: {len(resposta_json) if resposta_json else 0}")
+        print(f"Tokens: {total_tokens}")
+
+        # Aqui tava dando erro de decodeJson e arrumamos
+        if resposta_json and resposta_json.strip():
+            try:
+                lista_alimentos, carboidratos, calorias, qtd_insulina, nome_insulina = Conecta.desmontar_json(
+                    resposta_json)
+                self.total_carboidratos = int(carboidratos)
+                self.total_calorias = int(calorias)
+                self.quantidade_insulina_recomendada = int(qtd_insulina)
+                self.nome_insulina = nome_insulina
+            except (ValueError, KeyError, json.JSONDecodeError) as e:
+                # Zamba fizemos esse teste pq antes tava dando problema por aqui
+                print(f"Erro ao processar resposta da IA: {e}")
+                self.total_carboidratos = 0
+                self.total_calorias = 0
+                self.quantidade_insulina_recomendada = 0
+                self.nome_insulina = "Não disponível"
+        else:
+            self.total_carboidratos = 0
+            self.total_calorias = 0
+            self.quantidade_insulina_recomendada = 0
+            self.nome_insulina = "Não disponível"
+
         tokens_string = str(total_tokens).split(' ')
         self.quantidade_tokens_consumidos = int(tokens_string[1]) if len(tokens_string) > 1 else 0
 
